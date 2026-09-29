@@ -1,471 +1,230 @@
-"use client"
+"use client";
 
-import React, { useState, useRef, useEffect } from 'react';
-import { formatCurrency } from '../utils/currencyFormatter'; // Import the utility function
+import React, { useState, useRef } from 'react';
 import { toPng } from 'html-to-image';
+import { ReceiptTemplateType, ThePlaceDetails, ThePlaceItem, SparDetails, SparItem } from '../types/receipt';
+import {
+  defaultThePlaceDetails,
+  defaultThePlaceItems,
+  defaultSparDetails,
+  defaultSparItems,
+} from '../utils/receiptPresets';
+import ThePlaceReceipt from './templates/ThePlaceReceipt';
+import SparReceipt from './templates/SparReceipt';
+import ThePlaceForm from './forms/ThePlaceForm';
+import SparForm from './forms/SparForm';
 
-// Define interfaces for the data structures
-interface Item {
-  name: string;
-  unit: string;
-  qty: number;
-  amount: number;
-}
-
-interface ReceiptDetails {
-  storeName: string;
-  storeAddress: string;
-  receiptNumber: string;
-  receiptDate: string;
-  time: string;
-  cusNo: string;
-  cashierName: string;
-  cashierPhone: string;
-  orderType: string;
-  remark: string;
-  paymentType: string;
-  transferRef: string;
-}
-
-declare global {
-  interface Window {
-    html2canvas: (element: HTMLElement, options?: object) => Promise<HTMLCanvasElement>;
-  }
-}
-
-
-// Main App component which acts as the receipt generator
 export default function ReceiptGenerator() {
-  // useRef hook to create a reference to the receipt preview div.
-  // This ref will be used by html2canvas to capture the receipt's content.
+  const [activeTemplate, setActiveTemplate] = useState<ReceiptTemplateType>('spar');
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  // The Place State
+  const [thePlaceDetails, setThePlaceDetails] = useState<ThePlaceDetails>(defaultThePlaceDetails);
+  const [thePlaceItems, setThePlaceItems] = useState<ThePlaceItem[]>(defaultThePlaceItems);
+
+  // SPAR State
+  const [sparDetails, setSparDetails] = useState<SparDetails>(defaultSparDetails);
+  const [sparItems, setSparItems] = useState<SparItem[]>(defaultSparItems);
+  const [sparLogoVariant, setSparLogoVariant] = useState<'thermal' | 'color'>('thermal');
+
+  // Ref to the active receipt DOM element for html-to-image capture
   const receiptRef = useRef<HTMLDivElement | null>(null);
- // Specify the type of element the ref will hold
 
-  // State to hold the static details of the receipt (store info, cashier, etc.)
-  // Use the ReceiptDetails interface for type safety
-  const [receiptDetails, setReceiptDetails] = useState<ReceiptDetails>({
-    storeName: "The Place Restaurant Alausa Lagos.",
-    storeAddress: "customerservice@theplace.com.ng",
-    receiptNumber: "1058961",
-    receiptDate: "2025-08-17", // Changed to YYYY-MM-DD format for date input compatibility
-    time: "23:56", // Changed to HH:MM for time input compatibility
-    cusNo: "",
-    cashierName: "Julius Angela",
-    cashierPhone: "0903-0175-869",
-    orderType: "Take-Away",
-    remark: "",
-    paymentType: "TRANSFER",
-    transferRef: "#979575",
-  });
-
-  // State to hold the dynamic list of items on the receipt
-  // Use the Item interface for type safety in the array
-  const [items, setItems] = useState<Item[]>([
-    { name: "Branded pack", unit: "Pcs", qty: 2, amount: 1200.00 },
-    { name: "Asun Pepper Rice. REGULAR", unit: "1", qty: 1, amount: 4500.00 },
-    { name: "Asun Pepper Rice. LARGE P", unit: "1", qty: 1, amount: 6700.00 },
-    { name: "Special fried rice LARGE P", unit: "1", qty: 1, amount: 4700.00 },
-    { name: "Barbeque Chicken", unit: "Pcs", qty: 2, amount: 3800.00 },
-    { name: "Eva Water (75cl)", unit: "Pcs", qty: 2, amount: 800.00 },
-  ]);
-
-  // Calculate subtotal dynamically based on current items
-  const subtotal = items.reduce((sum, item) => sum + (item.qty * item.amount), 0);
-  const totalAmount = subtotal; // In this example, total is same as subtotal
-
-  // Handler for changes in the main receipt details inputs
-  const handleDetailChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    setReceiptDetails(prevDetails => ({
-      ...prevDetails,
-      [name]: value
-    }));
+  // Reset helpers
+  const handleResetThePlace = () => {
+    if (confirm("Reset The Place details to default preset?")) {
+      setThePlaceDetails(defaultThePlaceDetails);
+      setThePlaceItems(defaultThePlaceItems);
+    }
   };
 
-  // Handler for changes in individual item properties
-  const handleItemChange = (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value, type } = e.target;
-    const newItems = [...items]; // Create a mutable copy of the items array
-    newItems[index] = {
-      ...newItems[index],
-      [name]: type === 'number' ? parseFloat(value) : value // Parse numbers for numeric inputs
-    };
-    setItems(newItems); // Update the state with the modified items
+  const handleResetSpar = () => {
+    if (confirm("Reset SPAR details to reference receipt preset?")) {
+      setSparDetails(defaultSparDetails);
+      setSparItems(defaultSparItems);
+    }
   };
 
-  // Function to add a new blank item row to the list
-  const addItem = () => {
-    setItems([...items, { name: "", unit: "", qty: 1, amount: 0 }]);
-  };
-
-  // Function to remove an item row by its index
-  const removeItem = (index: number) => {
-    const newItems = items.filter((_, i) => i !== index); // Filter out the item at the given index
-    setItems(newItems);
-  };
-
-  // Function to download the receipt as a PNG image
-  const downloadReceiptAsImage = () => {
+  // Image Download handler
+  const handleDownload = async () => {
     const node = receiptRef.current;
-
     if (!node) return;
 
-    toPng(node, {
-      skipFonts: true,       // ✅ Avoid cross-origin font access issues
-      cacheBust: true,       // ✅ Avoid stale images
-      pixelRatio: 2,         // ✅ Higher resolution (like html2canvas scale: 2)
-      backgroundColor: '#ffffff' // ✅ Set a background if your component is transparent
-    })
-      .then((dataUrl) => {
-        const link = document.createElement('a');
-        link.download = `receipt-${receiptDetails.receiptNumber}.png`;
-        link.href = dataUrl;
-        link.click();
-      })
-      .catch((error) => {
-        console.error('Error generating image:', error);
-        alert('There was an error generating the image. Check the console for details.');
+    try {
+      setIsDownloading(true);
+      const dataUrl = await toPng(node, {
+        skipFonts: true,
+        cacheBust: true,
+        pixelRatio: 3, // Ultra-sharp 3x resolution for thermal print simulation
+        backgroundColor: '#ffffff',
       });
-  };
 
-  const generateRandomRefs = () => {
-    const randomReceiptNumber = Math.floor(1000000 + Math.random() * 9000000).toString();
-    const randomTransferRef = `#${Math.floor(100000 + Math.random() * 900000)}`;
-    
-    setReceiptDetails(prevDetails => ({
-      ...prevDetails,
-      receiptNumber: randomReceiptNumber,
-      transferRef: randomTransferRef
-    }));
-  };
+      const receiptNumber =
+        activeTemplate === 'spar'
+          ? sparDetails.receiptNumber
+          : thePlaceDetails.receiptNumber;
 
-  // useEffect to dynamically load the html2canvas script when the component mounts.
-  // This ensures the library is available before the download function is called.
-  useEffect(() => {
-    // Only append the script if it hasn't been loaded already
-    if (typeof window.html2canvas === 'undefined') {
-      const script = document.createElement('script');
-      script.src = "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js";
-      script.async = true; // Load script asynchronously
-      document.body.appendChild(script);
+      const filename = `${activeTemplate}-receipt-${receiptNumber || Date.now()}.png`;
+
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = dataUrl;
+      link.click();
+    } catch (err) {
+      console.error('Error generating receipt image:', err);
+      alert('Failed to generate image. Please check the browser console.');
+    } finally {
+      setIsDownloading(false);
     }
-  }, []); // Empty dependency array means this effect runs only once on mount
+  };
 
   return (
-    <div className="min-h-screen bg-gray-100 p-4 sm:p-6 lg:p-8 flex flex-col lg:flex-row gap-6 text-gray-500">
-      {/* Left Section: Input Fields for editing receipt details */}
-      <div className="w-full lg:w-1/2 bg-white rounded-lg shadow-xl p-6 overflow-y-auto">
-        <h2 className="text-2xl font-bold mb-6 text-center text-gray-800">Receipt Details Editor 📝</h2>
+    <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col">
+      {/* Top Application Bar */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-xs">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white font-bold text-xl shadow-md">
+              🧾
+            </div>
+            <div>
+              <h1 className="text-lg font-bold text-slate-900 leading-tight">Receipt Generator</h1>
+              <p className="text-xs text-slate-500">Create authentic thermal POS receipts & invoices</p>
+            </div>
+          </div>
 
-        {/* Store Information Section */}
-        <div className="mb-6 border-b pb-4">
-          <h3 className="text-xl font-semibold mb-3 text-gray-700">Store Information</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <label className="block">
-              <span className="text-gray-700 text-sm">Store Name:</span>
-              <input
-                type="text"
-                name="storeName"
-                value={receiptDetails.storeName}
-                onChange={handleDetailChange}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50 p-2"
-              />
-            </label>
-            <label className="block">
-              <span className="text-gray-700 text-sm">Store Email/Address:</span>
-              <input
-                type="text"
-                name="storeAddress"
-                value={receiptDetails.storeAddress}
-                onChange={handleDetailChange}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50 p-2"
-              />
-            </label>
-            <label className="block relative">
-              <span className="text-gray-700 text-sm">Receipt Number:</span>
-              <input
-                type="text"
-                name="receiptNumber"
-                value={receiptDetails.receiptNumber}
-                onChange={handleDetailChange}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50 p-2"
-              />
-              <button
-                  type="button"
-                  onClick={generateRandomRefs}
-                  className="absolute right-2 top-9 text-gray-500 hover:text-blue-600 focus:outline-none"
-                  title="Generate"
-                >
-                  🔄
-                </button>
-            </label>
-            <label className="block">
-              <span className="text-gray-700 text-sm">Date:</span>
-              <input
-                type="date"
-                name="receiptDate"
-                value={receiptDetails.receiptDate}
-                onChange={handleDetailChange}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50 p-2"
-              />
-            </label>
-            <label className="block">
-              <span className="text-gray-700 text-sm">Time:</span>
-              <input
-                type="time"
-                name="time"
-                value={receiptDetails.time}
-                onChange={handleDetailChange}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50 p-2"
-              />
-            </label>
-            <label className="block">
-              <span className="text-gray-700 text-sm">Cashier Name:</span>
-              <input
-                type="text"
-                name="cashierName"
-                value={receiptDetails.cashierName}
-                onChange={handleDetailChange}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50 p-2"
-              />
-            </label>
-            <label className="block">
-              <span className="text-gray-700 text-sm">Cashier Phone:</span>
-              <input
-                type="text"
-                name="cashierPhone"
-                value={receiptDetails.cashierPhone}
-                onChange={handleDetailChange}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50 p-2"
-              />
-            </label>
-            <label className="block">
-              <span className="text-gray-700 text-sm">Order Type:</span>
-              <select
-                name="orderType"
-                value={receiptDetails.orderType}
-                onChange={handleDetailChange}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50 p-2"
-              >
-                <option value="Take-Away">Take-Away</option>
-                <option value="Dine-In">Dine-In</option>
-                <option value="Delivery">Delivery</option>
-              </select>
-            </label>
+          {/* Template Selection Tabs */}
+          <div className="flex items-center bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+            <button
+              type="button"
+              onClick={() => setActiveTemplate('spar')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                activeTemplate === 'spar'
+                  ? 'bg-white text-red-600 shadow-sm ring-1 ring-slate-200'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span className="w-2.5 h-2.5 rounded-full bg-red-600"></span>
+              SPAR Supermarket
+              <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-medium">
+                New ✨
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTemplate('theplace')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                activeTemplate === 'theplace'
+                  ? 'bg-white text-amber-700 shadow-sm ring-1 ring-slate-200'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+              The Place Restaurant
+            </button>
           </div>
         </div>
+      </header>
 
-        {/* Items Section */}
-        <div className="mb-6 border-b pb-4">
-          <h3 className="text-xl font-semibold mb-3 text-gray-700">Items 🛍️</h3>
-          {/* Map through items state to render editable input fields for each item */}
-          {items.map((item, index) => (
-            <div key={index} className="grid grid-cols-1 sm:grid-cols-6 gap-2 mb-3 items-end p-2 border border-gray-200 rounded-md bg-gray-50">
-              <label className="block col-span-2">
-                <span className="text-gray-700 text-xs">Item Name:</span>
-                <input
-                  type="text"
-                  name="name"
-                  value={item.name}
-                  onChange={(e) => handleItemChange(index, e)}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm p-2"
-                />
-              </label>
-              <label className="block">
-                <span className="text-gray-700 text-xs">Unit:</span>
-                <input
-                  type="text"
-                  name="unit"
-                  value={item.unit}
-                  onChange={(e) => handleItemChange(index, e)}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm p-2"
-                />
-              </label>
-              <label className="block">
-                <span className="text-gray-700 text-xs">Qty:</span>
-                <input
-                  type="number"
-                  name="qty"
-                  value={item.qty}
-                  onChange={(e) => handleItemChange(index, e)}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm p-2"
-                  min="1"
-                />
-              </label>
-              <label className="block">
-                <span className="text-gray-700 text-xs">Amount:</span>
-                <input
-                  type="number"
-                  name="amount"
-                  value={item.amount}
-                  onChange={(e) => handleItemChange(index, e)}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm text-sm p-2"
-                  step="0.01" // Allow decimal amounts
-                  min="0"
-                />
-              </label>
-              <button
-                type="button"
-                onClick={() => removeItem(index)}
-                className="col-span-1 bg-red-500 text-white p-2 rounded-md hover:bg-red-600 transition duration-150 ease-in-out text-sm h-10 w-full shadow-md"
-              >
-                Remove
-              </button>
+      {/* Main Workspace Layout */}
+      <main className="max-w-7xl mx-auto w-full p-4 sm:p-6 lg:p-8 flex-1 flex flex-col lg:flex-row gap-8 items-start">
+        {/* Left Side: Form Editor Panel */}
+        <section className="w-full lg:w-7/12 bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-6">
+            <div>
+              <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                <span>📝 Receipt Editor</span>
+                <span className="text-xs px-2.5 py-1 rounded-full font-semibold uppercase bg-slate-100 text-slate-600">
+                  {activeTemplate === 'spar' ? 'SPAR POS Template' : 'The Place Template'}
+                </span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Customize every line, item, pricing, and tax information in real-time.
+              </p>
             </div>
-          ))}
-          <button
-            type="button"
-            onClick={addItem}
-            className="w-full bg-green-500 text-white py-2 rounded-md hover:bg-green-600 transition duration-150 ease-in-out font-semibold mt-4 shadow-md"
-          >
-            Add Item
-          </button>
-        </div>
+          </div>
 
-        {/* Payment and Other Details Section */}
-        <div className="mb-6 border-b pb-4">
-          <h3 className="text-xl font-semibold mb-3 text-gray-700">Payment & Other Information 💳</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <label className="block">
-              <span className="text-gray-700 text-sm">Payment Type:</span>
-              <input
-                type="text"
-                name="paymentType"
-                value={receiptDetails.paymentType}
-                onChange={handleDetailChange}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50 p-2"
+          {activeTemplate === 'spar' ? (
+            <SparForm
+              details={sparDetails}
+              items={sparItems}
+              setDetails={setSparDetails}
+              setItems={setSparItems}
+              logoVariant={sparLogoVariant}
+              setLogoVariant={setSparLogoVariant}
+              onResetDefault={handleResetSpar}
+            />
+          ) : (
+            <ThePlaceForm
+              details={thePlaceDetails}
+              items={thePlaceItems}
+              setDetails={setThePlaceDetails}
+              setItems={setThePlaceItems}
+              onResetDefault={handleResetThePlace}
+            />
+          )}
+        </section>
+
+        {/* Right Side: Live Receipt Preview & Actions */}
+        <aside className="w-full lg:w-5/12 lg:sticky lg:top-24 flex flex-col items-center">
+          {/* Action Toolbar */}
+          <div className="w-full max-w-[360px] mb-4 flex items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
+            <div className="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              Live Thermal Preview
+            </div>
+
+            <button
+              onClick={handleDownload}
+              disabled={isDownloading}
+              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg font-bold text-xs shadow-md transition transform active:scale-95"
+            >
+              {isDownloading ? (
+                <>
+                  <svg className="animate-spin h-3.5 w-3.5 text-white" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                  </svg>
+                  <span>Exporting...</span>
+                </>
+              ) : (
+                <>
+                  <span>📸 Download PNG</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Receipt Canvas Container */}
+          <div className="w-full flex items-center justify-center p-3 sm:p-6 bg-slate-200/70 rounded-2xl border border-dashed border-slate-300">
+            {activeTemplate === 'spar' ? (
+              <SparReceipt
+                details={sparDetails}
+                items={sparItems}
+                receiptRef={receiptRef}
+                logoVariant={sparLogoVariant}
               />
-            </label>
-            <label className="block relative">
-              <span className="text-gray-700 text-sm">Transfer Reference:</span>
-              <input
-                type="text"
-                name="transferRef"
-                value={receiptDetails.transferRef}
-                onChange={handleDetailChange}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50 p-2"
+            ) : (
+              <ThePlaceReceipt
+                details={thePlaceDetails}
+                items={thePlaceItems}
+                receiptRef={receiptRef}
               />
-                <button
-                  type="button"
-                  onClick={generateRandomRefs}
-                  className="absolute right-2 top-9 text-gray-500 hover:text-blue-600 focus:outline-none"
-                  title="Generate"
-                >
-                  🔄
-                </button>
-            </label>
-          </div>
-          <label className="block mt-4">
-            <span className="text-gray-700 text-sm">Remark:</span>
-            <textarea
-              name="remark"
-              value={receiptDetails.remark}
-              onChange={handleDetailChange}
-              rows={2}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50 p-2"
-            ></textarea>
-          </label>
-        </div>
-
-        {/* Download Button */}
-        <button
-          onClick={downloadReceiptAsImage}
-          className="w-full bg-blue-600 text-white py-3 rounded-md hover:bg-blue-700 transition duration-150 ease-in-out font-bold text-lg shadow-lg transform hover:scale-105"
-        >
-          Download Receipt as Image (PNG) 📸
-        </button>
-      </div>
-
-      {/* Right Section: Receipt Live Preview */}
-      <div className="w-full lg:w-1/2 flex items-start justify-center p-4">
-        {/* The receipt preview container with a fixed width to simulate thermal paper */}
-        <div ref={receiptRef} className="w-80 bg-white rounded-lg shadow-xl overflow-hidden font-mono text-xs sm:text-sm border border-gray-300 print-area">
-          {/* Receipt Header Section */}
-          <div className="p-4  mt-6 text-center border-b box-content border-gray-300">
-            <p className="">{receiptDetails.storeName}</p>
-            <p className="text-gray-700 leading-tight">{receiptDetails.storeAddress}</p>
+            )}
           </div>
 
-          {/* Receipt Details Section */}
-          <div className="p-4 border-b border-gray-300">
-            <div className="flex justify-between mb-1">
-              <span className="font-semibold">Receipt #:</span>
-              <span>{receiptDetails.receiptNumber}</span>
-            </div>
-            <div className="flex justify-between mb-1">
-              <span className="font-semibold">Date:</span>
-              <span>{receiptDetails.receiptDate}</span>
-            </div>
-            <div className="flex justify-between mb-1">
-              <span className="font-semibold">Time:</span>
-              <span>{receiptDetails.time}</span>
-            </div>
-            <div className="flex justify-between mb-1">
-              <span className="font-semibold">Cashier Name:</span>
-              <span>{receiptDetails.cashierName}</span>
-            </div>
-            <div className="flex justify-between mb-1">
-              <span className="font-semibold">Phone No:</span>
-              <span>{receiptDetails.cashierPhone}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="font-semibold">Order Type:</span>
-              <span>{receiptDetails.orderType}</span>
-            </div>
+          {/* Help & Print Info */}
+          <div className="w-full max-w-[360px] mt-4 text-center text-xs text-slate-500 space-y-1">
+            <p>
+              💡 Formatted to standard <strong>80mm thermal receipt roll</strong> scale.
+            </p>
+            <p className="text-[11px] text-slate-400">
+              Downloaded image is high-resolution (3x) ready for digital archiving or printing.
+            </p>
           </div>
-
-          {/* Items Table Header */}
-          <div className="p-4 pt-3 pb-2 border-b border-gray-300">
-            <div className="grid grid-cols-4 font-bold text-gray-800">
-              <span className="col-span-2">Item Name</span>
-              <span className="text-center">Qty</span>
-              <span className="text-right">Amount</span>
-            </div>
-          </div>
-
-          {/* Items List */}
-          <div className="p-4 py-2 border-b border-gray-300">
-            {items.map((item, index) => (
-              <div key={index} className="grid grid-cols-4 text-gray-800 mb-1">
-                <span className="col-span-2">{item.name}</span>
-                <span className="text-center">{item.qty}</span>
-                <span className="text-right">{formatCurrency(item.qty * item.amount)}</span>
-              </div>
-            ))}
-          </div>
-
-          {/* Subtotal and Total */}
-          <div className="p-4 pt-2 pb-1 border-b border-gray-300">
-            <div className="flex justify-between font-bold text-gray-900 text-base mb-1">
-              <span>Subtotal:</span>
-              <span>{formatCurrency(subtotal)}</span>
-            </div>
-            <div className="text-center text-xs text-gray-600 mb-2">Settled</div>
-            <div className="flex justify-between text-gray-800">
-              <span className="font-bold uppercase">{receiptDetails.paymentType}</span>
-              <span>{receiptDetails.transferRef}</span>
-              <span className="font-bold">{formatCurrency(totalAmount)}</span>
-            </div>
-          </div>
-
-          {/* Footer Message */}
-          <div className="p-4 text-center text-gray-700 text-xs leading-tight">
-            <p className="mb-2 font-semibold">Thank You For Patronizing!!!</p>
-            <p className="mb-1">For feedbacks and enquiries</p>
-            <p>08182862824, 08183742775</p>
-            <p className="mb-2">WhatsApp only - 07066742998</p>
-            {receiptDetails.remark && <p className="mt-2 text-red-500 font-bold">Remark: {receiptDetails.remark}</p>}
-          </div>
-
-          {/* Bill Preparation Details (Mimicking printed text) */}
-          <div className="p-4 pt-0 text-gray-600 text-[10px] sm:text-xs">
-            <p>Bill Prepared By: {receiptDetails.cashierName}</p>
-            <p>Bill Printed Time: {receiptDetails.time}</p>
-            <p>Bill Settle By: {receiptDetails.cashierName}</p>
-            <p>Payment Type: {receiptDetails.paymentType.toUpperCase()}</p>
-          </div>
-        </div>
-      </div>
+        </aside>
+      </main>
     </div>
   );
 }
